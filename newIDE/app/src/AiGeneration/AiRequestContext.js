@@ -13,6 +13,10 @@ import Window from '../Utils/Window';
 import { AI_SETTINGS_FETCH_TIMEOUT } from '../Utils/GlobalFetchTimeouts';
 import { useAsyncLazyMemo } from '../Utils/UseLazyMemo';
 import { retryIfFailed } from '../Utils/RetryIfFailed';
+import { serializeToJSObject } from '../Utils/Serializer';
+import useForceUpdate from '../Utils/UseForceUpdate';
+
+const gd: libGDevelop = global.gd;
 
 type EditorFunctionCallResultsStorage = {|
   getEditorFunctionCallResults: (
@@ -106,13 +110,29 @@ type AiRequestHistory = {|
   resetNavigation: () => void,
 |};
 
+export type ProjectSavesForAiRequest = {|
+  [aiRequestMessageIndex: number]: any,
+|};
+export type ProjectSaves = {|
+  [aiRequestId: string]: ProjectSavesForAiRequest,
+|};
+export type AiRequestProjectSaves = {|
+  projectSaves: ProjectSaves,
+  addProjectSaveToLastMessage: (aiRequest: AiRequest, save: any) => void,
+  restoreProjectSave: (
+    aiRequest: AiRequest,
+    aiMessageIndex: number,
+    project: gdProject
+  ) => void,
+|};
+
 type AiRequestSendState = {|
   isSending: boolean,
   lastSendError: ?Error,
 |};
 
 type PaginationState = {|
-  aiRequests: { [string]: AiRequest },
+  aiRequests: { [aiRequestId: string]: AiRequest },
   nextPageUri: ?Object,
 |};
 
@@ -407,9 +427,84 @@ export const useAiRequestHistory = (
   };
 };
 
+export const useAiRequestProjectSaves = (): AiRequestProjectSaves => {
+  const [projectSaves, setProjectSaves] = React.useState<ProjectSaves>({});
+  const forceUpdate = useForceUpdate();
+
+  console.log('projectSaves', projectSaves);
+
+  const addProjectSaveToLastMessage = React.useCallback(
+    (aiRequest: AiRequest, project: gdProject) => {
+      console.log('aiRequest', aiRequest);
+      if (!aiRequest) return;
+
+      const aiMessages = aiRequest.output;
+      const lastAiMessageIndex = aiMessages.length - 1;
+      if (lastAiMessageIndex < 0) return;
+
+      const serializedProjectObject = serializeToJSObject(project);
+
+      console.log('serializedProjectObject', serializedProjectObject);
+
+      setProjectSaves(
+        (prevSaves: ProjectSaves): ProjectSaves => {
+          const aiRequestMessagesSaves = prevSaves[aiRequest.id] || {};
+          const newSavesForAiRequest = {
+            ...aiRequestMessagesSaves,
+            [lastAiMessageIndex]: serializedProjectObject,
+          };
+          const newSaves = {
+            ...prevSaves,
+            [aiRequest.id]: newSavesForAiRequest,
+          };
+          console.log('newSaves', newSaves);
+          return newSaves;
+        }
+      );
+
+      console.info('Project save added for AI request', aiRequest.id);
+    },
+    [setProjectSaves]
+  );
+
+  const restoreProjectSave = React.useCallback(
+    (aiRequest: AiRequest, aiMessageIndex: number, project: gdProject) => {
+      if (!aiRequest) return;
+
+      console.log('aiRequest', aiRequest, aiMessageIndex);
+
+      const aiMessages = aiRequest.output;
+      if (aiMessageIndex < 0 || aiMessageIndex >= aiMessages.length) return;
+
+      console.log('Restoring project save for AI request', projectSaves);
+
+      const aiRequestMessagesSaves = projectSaves[aiRequest.id] || {};
+      const projectObject = aiRequestMessagesSaves[aiMessageIndex] || null;
+      console.log('projectObject', projectObject);
+      if (!projectObject) return;
+
+      console.log('Deserializing project', projectObject);
+      const serializedProject = gd.Serializer.fromJSObject(projectObject);
+
+      console.log('unserializing project', serializedProject);
+      project.unserializeFrom(serializedProject);
+
+      forceUpdate();
+    },
+    [projectSaves, forceUpdate]
+  );
+
+  return {
+    projectSaves,
+    addProjectSaveToLastMessage,
+    restoreProjectSave,
+  };
+};
+
 type AiRequestContextState = {|
   aiRequestStorage: AiRequestStorage,
   aiRequestHistory: AiRequestHistory,
+  aiRequestProjectSaves: AiRequestProjectSaves,
   editorFunctionCallResultsStorage: EditorFunctionCallResultsStorage,
   getAiSettings: () => AiSettings | null,
 |};
@@ -433,6 +528,11 @@ export const initialAiRequestContextState: AiRequestContextState = {
     handleNavigateHistory: ({ direction, currentText, onChangeText }) => {},
     resetNavigation: () => {},
   },
+  aiRequestProjectSaves: {
+    projectSaves: {},
+    addProjectSaveToLastMessage: () => {},
+    restoreProjectSave: () => {},
+  },
   editorFunctionCallResultsStorage: {
     getEditorFunctionCallResults: () => [],
     addEditorFunctionCallResults: () => {},
@@ -452,6 +552,7 @@ export const AiRequestProvider = ({ children }: AiRequestProviderProps) => {
   const editorFunctionCallResultsStorage = useEditorFunctionCallResultsStorage();
   const aiRequestStorage = useAiRequestsStorage();
   const aiRequestHistory = useAiRequestHistory(aiRequestStorage);
+  const aiRequestProjectSaves = useAiRequestProjectSaves();
 
   const environment = Window.isDev() ? 'staging' : 'live';
   const getAiSettings = useAsyncLazyMemo(
@@ -488,12 +589,14 @@ export const AiRequestProvider = ({ children }: AiRequestProviderProps) => {
     () => ({
       aiRequestStorage,
       aiRequestHistory,
+      aiRequestProjectSaves,
       editorFunctionCallResultsStorage,
       getAiSettings,
     }),
     [
       aiRequestStorage,
       aiRequestHistory,
+      aiRequestProjectSaves,
       editorFunctionCallResultsStorage,
       getAiSettings,
     ]
