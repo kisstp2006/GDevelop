@@ -4,6 +4,7 @@ import classes from './ChatBubble.module.css';
 import Paper from '../../UI/Paper';
 import ArrowTopThenLeft from '../../UI/CustomSvgIcons/ArrowTopThenLeft';
 import IconButton from '../../UI/IconButton';
+import GDevelopThemeContext from '../../UI/Theme/GDevelopThemeContext';
 
 const styles = {
   chatBubble: {
@@ -11,6 +12,12 @@ const styles = {
     paddingLeft: 16,
     paddingRight: 16,
     paddingBottom: 5,
+  },
+  assistantChatBubbleLight: {
+    background: 'linear-gradient(90deg, #F5F5F7 77%, #EAE3FF 100%)',
+  },
+  assistantChatBubbleDark: {
+    background: 'linear-gradient(90deg, #25252E 0%, #312442 100%)',
   },
 };
 
@@ -30,6 +37,9 @@ export const ChatBubble = ({
   role,
   restoreProps,
 }: ChatBubbleProps) => {
+  const theme = React.useContext(GDevelopThemeContext);
+  const isLightTheme = theme.palette.type === 'light';
+
   return (
     <div className={classes.chatBubbleContainer}>
       <div className={classes.chatBubbleRestoreArrow}>
@@ -46,7 +56,14 @@ export const ChatBubble = ({
       </div>
       <Paper
         background={role === 'user' ? 'light' : 'medium'}
-        style={styles.chatBubble}
+        style={{
+          ...styles.chatBubble,
+          ...(role === 'assistant'
+            ? isLightTheme
+              ? styles.assistantChatBubbleLight
+              : styles.assistantChatBubbleDark
+            : {}),
+        }}
       >
         <div className={classes.chatBubbleContent}>{children}</div>
         {feedbackButtons}
